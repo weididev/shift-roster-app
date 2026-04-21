@@ -10,39 +10,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      # THIS FIXES THE NODEJS VERSION ERROR
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
 
-      # INSTALL DEPENDENCIES & BUILD WEB APP
-      - name: Install dependencies
-        run: npm install
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
 
-      - name: Build Web App
-        run: npm run build
+    - name: Install Dependencies
+      run: npm install
 
-      # CAPACITOR AND ANDROID BUILD SETUP
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '17'
+    - name: Build Web App
+      run: npm run build
 
-      - name: Sync Capacitor
-        run: npx cap sync android
+    - name: Sync Capacitor
+      run: npx cap sync android
 
-      - name: Build APK
-        working-directory: ./android
-        run: ./gradlew assembleDebug
+    - name: Build APK
+      working-directory: ./android
+      run: ./gradlew assembleDebug
 
-      # UPLOAD APK TO GITHUB SO YOU CAN DOWNLOAD IT ON YOUR PHONE
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: shift-manager-pro-apk
+        path: android/app/build/outputs/apk/debug/app-debug.apk
