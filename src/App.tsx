@@ -1,0 +1,1131 @@
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { 
+  UploadCloud, Calendar, Share2, FileSpreadsheet, Trash2, Smartphone, 
+  Users, BarChart3, X, Download, Save, ChevronRight, UserPlus, 
+  Settings2, Fingerprint, Map, Table, Zap, Briefcase
+} from 'lucide-react';
+import { format, addDays, getDay, startOfMonth, getDaysInMonth } from 'date-fns';
+
+type RowData = Record<string, string | number>;
+
+// Utility functions
+const isNameOrId = (col: string) => /id|name|no\.|serial|sn|designation/i.test(col);
+const getDateColumns = (cols: string[]) => cols.filter(c => !isNameOrId(c) && c !== '_uid' && c.trim() !== '');
+
+const getSN = (row: RowData, cols: string[]) => {
+  const key = cols.find(k => /sn|serial/i.test(k)) || Object.keys(row).find(k => /sn|serial/i.test(k));
+  return key ? String(row[key] || '').trim() : '';
+};
+
+const getName = (row: RowData, cols: string[]) => {
+  const key = cols.find(k => /name|identity/i.test(k)) || Object.keys(row).find(k => /name|identity/i.test(k));
+  return key ? String(row[key] || '').trim() : 'Unknown';
+};
+
+const getId = (row: RowData, cols: string[]) => {
+  const key = cols.find(k => /id|no\./i.test(k) && !/name|identity/i.test(k)) || Object.keys(row).find(k => /id|no\./i.test(k) && !/name|identity/i.test(k));
+  return key ? String(row[key] || '').trim() : '';
+};
+
+const getColumnWeight = (col: string) => {
+  if (/sn|serial/i.test(col)) return 1;
+  if (/id|no\./i.test(col) && !/name|identity/i.test(col)) return 2;
+  if (/name|identity/i.test(col)) return 3;
+  if (/designation/i.test(col)) return 4;
+  return 5;
+};
+
+const generateUid = () => 'uid_' + Math.random().toString(36).substr(2, 9);
+
+export interface AllocationRecord {
+  id: string;
+  staffUid: string;
+  staffName: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  timestamp: number;
+  previousValues: Record<string, string>;
+}
+
+export default function App() {
+  const [data, setData] = useState<RowData[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [activeTab, setActiveTab] = useState<'daily'|'monthly'|'grid'|'manage'|'allocate'>('daily');
+  
+  const [allocations, setAllocations] = useState<AllocationRecord[]>([]);
+  
+  // Allocate State
+  const [allocStaffUid, setAllocStaffUid] = useState<string>('');
+  const [allocType, setAllocType] = useState<string>('LEAVE');
+  const [allocStart, setAllocStart] = useState<string>('');
+  const [allocEnd, setAllocEnd] = useState<string>('');
+  
+  // Modals state
+  const [editingStaff, setEditingStaff] = useState<RowData | null>(null);
+  const [showAddDate, setShowAddDate] = useState(false);
+  const [newDateInput, setNewDateInput] = useState('');
+
+  // Automation state
+  const [autoMonth, setAutoMonth] = useState<number>(new Date().getMonth());
+  const [autoYear, setAutoYear] = useState<number>(new Date().getFullYear());
+  const [autoShift, setAutoShift] = useState<string>('P1');
+  const [autoWoDay, setAutoWoDay] = useState<number>(0); // 0 = Sunday
+
+  // Auto-suggestions values dynamically extracted + common ones
+  const uniqueShifts = useMemo(() => {
+    const shiftSet = new Set<string>();
+    data.forEach(row => {
+      getDateColumns(columns).forEach(c => {
+        const val = String(row[c] || '').trim().toUpperCase();
+        if (val) shiftSet.add(val);
+      });
+    });
+    ['P1', 'P2', 'AM', 'WO', 'PL', 'CL', 'SL', 'C/OFF', 'TR', 'LEAVE', 'SENIOR EXECUTIVE', 'EXECUTIVE', 'OFFICER'].forEach(s => shiftSet.add(s));
+    return Array.from(shiftSet).sort();
+  }, [data, columns]);
+
+  // Load from LocalStorage for persistence on mobile
+  useEffect(() => {
+    try {
+      const savedData = localStorage.getItem('shiftData');
+      const savedCols = localStorage.getItem('shiftCols');
+      const savedFile = localStorage.getItem('shiftFileName');
+      if (savedData && savedCols) {
+        setData(JSON.parse(savedData));
+        setColumns(JSON.parse(savedCols));
+        if (savedFile) setFileName(savedFile);
+      }
+      const savedAlloc = localStorage.getItem('shiftAllocations');
+      if (savedAlloc) {
+        setAllocations(JSON.parse(savedAlloc));
+      }
+    } catch (e) {
+      console.error('Failed to load local data');
+    }
+  }, []);
+
+  const saveDataLocally = (newData: RowData[], newCols: string[], fname: string = fileName) => {
+    setData(newData);
+    setColumns(newCols);
+    setFileName(fname);
+    localStorage.setItem('shiftData', JSON.stringify(newData));
+    localStorage.setItem('shiftCols', JSON.stringify(newCols));
+    if (fname) localStorage.setItem('shiftFileName', fname);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const fname = file.name;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const bstr = evt.target?.result;
+      if (!bstr) return;
+
+      const wb = XLSX.read(bstr, { type: 'binary', raw: false });
+      const wsname = wb.SheetNames[0];
+      const ws = wb.Sheets[wsname];
+      
+      const json = XLSX.utils.sheet_to_json<RowData>(ws, { defval: '' });
+      
+      if (json.length > 0) {
+        const rawCols = Object.keys(json[0]);
+        const processedData = json.map((row) => ({ ...row, _uid: generateUid() }));
+        saveDataLocally(processedData, rawCols, fname);
+        
+        const dateCols = getDateColumns(rawCols);
+        if (dateCols.length > 0) {
+          setSelectedDate(dateCols[0]);
+        }
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleClear = () => {
+    setData([]);
+    setColumns([]);
+    setFileName('');
+    setSelectedDate('');
+    setAllocations([]);
+    setAllocStaffUid('');
+    setAllocStart('');
+    setAllocEnd('');
+    localStorage.removeItem('shiftData');
+    localStorage.removeItem('shiftCols');
+    localStorage.removeItem('shiftFileName');
+    localStorage.removeItem('shiftAllocations');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleAddAllocation = () => {
+      if(!allocStaffUid || !allocType || !allocStart || !allocEnd) return;
+      
+      const dList = getDateColumns(columns);
+      const startIdx = dList.indexOf(allocStart);
+      const endIdx = dList.indexOf(allocEnd);
+      if(startIdx === -1 || endIdx === -1) return;
+      
+      const minIdx = Math.min(startIdx, endIdx);
+      const maxIdx = Math.max(startIdx, endIdx);
+      const targetDates = dList.slice(minIdx, maxIdx + 1);
+
+      const staffRow = data.find(d => d._uid === allocStaffUid);
+      if(!staffRow) return;
+
+      const previousValues: Record<string, string> = {};
+      targetDates.forEach(d => {
+          previousValues[d] = String(staffRow[d] || '');
+      });
+
+      const newAlloc: AllocationRecord = {
+          id: generateUid(),
+          staffUid: allocStaffUid,
+          staffName: getName(staffRow, columns),
+          type: allocType,
+          startDate: dList[minIdx],
+          endDate: dList[maxIdx],
+          timestamp: Date.now(),
+          previousValues
+      };
+
+      const newData = data.map(row => {
+          if(row._uid === allocStaffUid) {
+              const updated = { ...row };
+              targetDates.forEach(d => {
+                  updated[d] = allocType;
+              });
+              return updated;
+          }
+          return row;
+      });
+
+      const updatedAllocs = [newAlloc, ...allocations];
+      setAllocations(updatedAllocs);
+      localStorage.setItem('shiftAllocations', JSON.stringify(updatedAllocs));
+      saveDataLocally(newData, columns);
+      
+      setAllocStaffUid('');
+      setAllocStart('');
+      setAllocEnd('');
+  };
+
+  const handleDeleteAllocation = (allocId: string) => {
+      const alloc = allocations.find(a => a.id === allocId);
+      if(!alloc) return;
+
+      const staffExists = data.some(d => d._uid === alloc.staffUid);
+      let newData = data;
+      if (staffExists) {
+          newData = data.map(row => {
+              if(row._uid === alloc.staffUid) {
+                  const updated = { ...row };
+                  Object.keys(alloc.previousValues).forEach(d => {
+                      updated[d] = alloc.previousValues[d];
+                  });
+                  return updated;
+              }
+              return row;
+          });
+      }
+
+      const updatedAllocs = allocations.filter(a => a.id !== allocId);
+      setAllocations(updatedAllocs);
+      localStorage.setItem('shiftAllocations', JSON.stringify(updatedAllocs));
+      saveDataLocally(newData, columns);
+  };
+
+  const dateList = useMemo(() => getDateColumns(columns), [columns]);
+
+  const gridStats = useMemo(() => {
+    const stats: Record<string, { totalWorking: number, breakdown: Record<string, number> }> = {};
+    dateList.forEach(date => {
+       let totalWorking = 0;
+       let breakdown: Record<string, number> = {};
+       
+       data.forEach(row => {
+          const val = String(row[date] || '').trim().toUpperCase();
+          if (!val || val === '-' || val === 'NOT ASSIGNED' || val === 'NA') return;
+          
+          const isOff = ['WO', 'OFF', 'C/OFF', 'LEAVE', 'PL', 'CL', 'SL', 'TR', 'TRAIN'].some(skip => val.includes(skip));
+          
+          if (!isOff) {
+             totalWorking++;
+             let cleanVal = val.replace(/P1:|P2:/g, '').trim();
+             if(!cleanVal) cleanVal = val;
+             breakdown[cleanVal] = (breakdown[cleanVal] || 0) + 1;
+          }
+       });
+       
+       stats[date] = { totalWorking, breakdown };
+    });
+    return stats;
+  }, [data, dateList]);
+
+  // Daily View Aggregation
+  const shifts = useMemo(() => {
+    if (!selectedDate || !data.length) return {};
+    const grouped: Record<string, RowData[]> = {};
+    data.forEach(row => {
+      let shiftValue = String(row[selectedDate] || '').trim();
+      if (!shiftValue || shiftValue === '-' || shiftValue.toLowerCase() === 'na') {
+        shiftValue = 'Not Assigned';
+      }
+      
+      const name = getName(row, columns);
+      if ((!name || name === 'Unknown') && !getId(row, columns)) return;
+      
+      if (!grouped[shiftValue]) grouped[shiftValue] = [];
+      grouped[shiftValue].push(row);
+    });
+
+    Object.keys(grouped).forEach(key => {
+      grouped[key].sort((a, b) => {
+        const snA_str = String(getSN(a, columns)).replace(/\D/g, '');
+        const snB_str = String(getSN(b, columns)).replace(/\D/g, '');
+        const snA = parseInt(snA_str, 10);
+        const snB = parseInt(snB_str, 10);
+        const validA = !isNaN(snA) ? snA : Number.MAX_SAFE_INTEGER;
+        const validB = !isNaN(snB) ? snB : Number.MAX_SAFE_INTEGER;
+        return validA - validB;
+      });
+    });
+
+    return grouped;
+  }, [data, selectedDate, columns]);
+
+  const generateWhatsAppText = () => {
+    let text = `📅 *Shift Schedule: ${selectedDate}*\n\n`;
+    const sortedShifts = Object.keys(shifts).sort((a,b) => {
+       if (a === 'Not Assigned') return 1;
+       if (b === 'Not Assigned') return -1;
+       return a.localeCompare(b);
+    });
+
+    sortedShifts.forEach(shift => {
+      text += `*🔹 ${shift.toUpperCase()}*\n`;
+      shifts[shift].forEach((emp, index) => {
+        const idText = getId(emp, columns) ? ` (${getId(emp, columns)})` : '';
+        text += `  ${index + 1}. ${getName(emp, columns)}${idText}\n`;
+      });
+      text += `\n`;
+    });
+    return encodeURIComponent(text.trim());
+  };
+
+  const handleShare = () => {
+    if (!selectedDate) return;
+    window.location.href = `https://wa.me/?text=${generateWhatsAppText()}`;
+  };
+
+  const handleExport = () => {
+    const exportData = data.map(row => {
+      const { _uid, ...rest } = row;
+      return rest;
+    });
+    const ws = XLSX.utils.json_to_sheet(exportData, { header: columns });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Roster");
+    XLSX.writeFile(wb, "Updated_Roster.xlsx");
+  };
+
+  const handleAddDateSave = () => {
+    if (!newDateInput.trim()) return;
+    const dateStr = newDateInput.trim();
+    if (columns.includes(dateStr)) {
+      alert("This date already exists.");
+      return;
+    }
+    const newCols = [...columns, dateStr];
+    const newData = data.map(row => ({...row, [dateStr]: ''}));
+    saveDataLocally(newData, newCols);
+    setShowAddDate(false);
+    setNewDateInput('');
+    setSelectedDate(dateStr);
+  };
+
+  // Grid Inline Editing
+  const handleInlineEdit = (uid: string, field: string, value: string) => {
+    const newData = data.map(row => {
+      if (row._uid === uid) {
+        return { ...row, [field]: value };
+      }
+      return row;
+    });
+    saveDataLocally(newData, columns);
+  };
+
+  // Automation / Auto-Fill Logic
+  const handleAutoFill = () => {
+    if (!editingStaff) return;
+    const start = startOfMonth(new Date(autoYear, autoMonth));
+    const daysInMonth = getDaysInMonth(start);
+    const newStaff = { ...editingStaff };
+    
+    for (let i = 0; i < daysInMonth; i++) {
+       const currentDate = addDays(start, i);
+       // Format: DD-MMM (e.g., 01-May)
+       const dateStr = format(currentDate, "dd-MMM");
+       
+       if (getDay(currentDate) === autoWoDay) {
+           newStaff[dateStr] = 'WO';
+       } else {
+           newStaff[dateStr] = autoShift;
+       }
+    }
+    setEditingStaff(newStaff);
+  };
+
+  const handleCommitProfileChanges = () => {
+    if (!editingStaff) return;
+    
+    // Auto-detect new columns added by automation
+    const newColsSet = new Set(columns);
+    Object.keys(editingStaff).forEach(k => {
+      if (k !== '_uid') newColsSet.add(k);
+    });
+    const newColsArr = Array.from(newColsSet) as string[];
+    
+    let isNew = !data.find(d => d._uid === editingStaff._uid);
+    let freshData = isNew 
+        ? [editingStaff, ...data] 
+        : data.map(d => d._uid === editingStaff._uid ? editingStaff : d);
+        
+    saveDataLocally(freshData, newColsArr);
+    setEditingStaff(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#09090b] text-zinc-200 pb-28 font-sans selection:bg-cyan-500/30">
+      
+      {/* Hidden Datalists for autocomplete */}
+      <datalist id="shift-suggestions">
+        {uniqueShifts.map(s => <option key={s} value={s} />)}
+      </datalist>
+      {columns.map(col => {
+         const uniqueVals = Array.from(new Set(data.map(r => String(r[col] || '').trim()).filter(Boolean)));
+         const safeId = col.replace(/[^a-zA-Z0-9]/g, '-');
+         return (
+           <datalist key={`list-${col}`} id={`suggestions-${safeId}`}>
+             {uniqueVals.map(v => <option key={v} value={v} />)}
+           </datalist>
+         );
+      })}
+
+      {/* Top App Header */}
+      <header className="sticky top-0 z-20 px-5 py-4 flex items-center justify-between border-b border-white/10 bg-[#09090b]/80 backdrop-blur-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 p-[1px] shadow-[0_0_15px_rgba(34,211,238,0.2)]">
+            <div className="w-full h-full bg-[#09090b] rounded-[15px] flex items-center justify-center">
+              <Settings2 className="w-5 h-5 text-cyan-400" />
+            </div>
+          </div>
+          <div>
+            <h1 className="text-lg font-display font-bold tracking-wide text-zinc-100">SHIFT<span className="text-cyan-400">PRO</span></h1>
+            {fileName && <p className="text-[10px] text-zinc-500 font-mono tracking-wider max-w-[150px] truncate">{fileName}</p>}
+          </div>
+        </div>
+        
+        {data.length > 0 && (
+          <button onClick={handleClear} className="w-10 h-10 rounded-xl bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-rose-400 hover:border-rose-400/50 transition-all active:scale-95" aria-label="Clear Data">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+      </header>
+
+      <main className="max-w-xl mx-auto px-4 py-6">
+        {activeTab !== 'manage' && data.length === 0 ? (
+          <div className="text-center py-20">
+            <div className="w-16 h-16 mx-auto bg-zinc-900 border border-white/5 rounded-2xl flex items-center justify-center mb-4">
+              <FileSpreadsheet className="w-8 h-8 text-zinc-500" />
+            </div>
+            <h3 className="text-zinc-300 font-bold mb-2">No Routine Found</h3>
+            <p className="text-zinc-500 text-sm max-w-xs mx-auto">Go to the Profile tab to mount your Excel source file and populate the roster.</p>
+          </div>
+        ) : (
+          <>
+            {/* -------------------- DAILY TAB -------------------- */}
+            <div className={`transition-opacity duration-300 ${activeTab === 'daily' ? 'opacity-100 block' : 'opacity-0 hidden'}`}>
+              <div className="mb-8">
+                 <label className="block text-[10px] font-mono text-cyan-400 uppercase tracking-widest mb-3 ml-2">Temporal Node</label>
+                 <div className="relative group">
+                   <select 
+                     value={selectedDate}
+                     onChange={(e) => setSelectedDate(e.target.value)}
+                     className="w-full pl-14 pr-12 py-4 bg-zinc-900 border border-white/10 rounded-2xl font-mono text-sm text-zinc-100 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 appearance-none shadow-inner outline-none transition-all"
+                   >
+                     {dateList.length === 0 && <option value="">No nodes available</option>}
+                     {dateList.map(d => <option key={d} value={d}>{d}</option>)}
+                   </select>
+                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-lg bg-zinc-800 flex items-center justify-center">
+                    <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                   </div>
+                   <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                     <ChevronRight className="w-5 h-5 text-zinc-500 rotate-90" />
+                   </div>
+                 </div>
+              </div>
+
+              {selectedDate && (
+                <div className="space-y-4">
+                  {Object.keys(shifts).sort((a,b) => (a==='Not Assigned'?1:(b==='Not Assigned'?-1:a.localeCompare(b)))).map(shiftName => {
+                    const emps = shifts[shiftName];
+                    const sl = shiftName.toLowerCase();
+                    
+                    // Specific Color Mapping based on new requirements
+                    let accentLine = "border-l-zinc-700";
+                    let bgBox = "bg-zinc-900/50";
+                    let accentText = "text-zinc-100";
+                    let badgeStyles = "bg-zinc-800 text-zinc-400 border border-white/5";
+
+                    if (sl === 'am' || sl.includes('am shift')) {
+                      accentLine = "border-l-blue-400 shadow-[-5px_0_15px_-5px_rgba(96,165,250,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-blue-950/20 to-zinc-900/50";
+                      accentText = "text-blue-400"; 
+                      badgeStyles = "bg-blue-500/10 border border-blue-500/20 text-blue-400"; 
+                    } else if (sl.includes('p1') || sl.includes('morn')) { 
+                      accentLine = "border-l-cyan-400 shadow-[-5px_0_15px_-5px_rgba(34,211,238,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-cyan-950/20 to-zinc-900/50";
+                      accentText = "text-cyan-400"; 
+                      badgeStyles = "bg-cyan-500/10 border border-cyan-500/20 text-cyan-400"; 
+                    } else if (sl.includes('p2') || sl.includes('even')) { 
+                      accentLine = "border-l-indigo-400 shadow-[-5px_0_15px_-5px_rgba(99,102,241,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-indigo-950/20 to-zinc-900/50";
+                      accentText = "text-indigo-400"; 
+                      badgeStyles = "bg-indigo-500/10 border border-indigo-500/20 text-indigo-400"; 
+                    } else if (sl.includes('leave') || sl.includes('pl') || sl.includes('cl') || sl.includes('sl')) { 
+                      accentLine = "border-l-rose-500 shadow-[-5px_0_15px_-5px_rgba(244,63,94,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-rose-950/20 to-zinc-900/50";
+                      accentText = "text-rose-400"; 
+                      badgeStyles = "bg-rose-500/10 border border-rose-500/20 text-rose-400"; 
+                    } else if (sl.includes('wo') || sl.includes('off') || sl.includes('c/off')) { 
+                      accentLine = "border-l-amber-500 shadow-[-5px_0_15px_-5px_rgba(245,158,11,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-amber-950/20 to-zinc-900/50";
+                      accentText = "text-amber-400"; 
+                      badgeStyles = "bg-amber-500/10 border border-amber-500/20 text-amber-400"; 
+                    } else if (sl.includes('tr') || sl.includes('train')) { 
+                      accentLine = "border-l-fuchsia-500 shadow-[-5px_0_15px_-5px_rgba(217,70,239,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-fuchsia-950/20 to-zinc-900/50";
+                      accentText = "text-fuchsia-400"; 
+                      badgeStyles = "bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400"; 
+                    } else if (sl.includes('executive') || sl.includes('officer')) {
+                      accentLine = "border-l-emerald-400 shadow-[-5px_0_15px_-5px_rgba(52,211,153,0.3)]"; 
+                      bgBox = "bg-gradient-to-r from-emerald-950/20 to-zinc-900/50";
+                      accentText = "text-emerald-400"; 
+                      badgeStyles = "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"; 
+                    }
+
+                    return (
+                      <div key={shiftName} className={`rounded-2xl border border-white/10 overflow-hidden border-l-[3px] ${accentLine} ${bgBox} backdrop-blur-md`}>
+                        <div className="px-5 py-4 border-b border-white/5 flex justify-between items-center bg-zinc-950/30">
+                          <h3 className={`font-display font-bold tracking-wide ${accentText}`}>
+                             {shiftName.toUpperCase() === 'AM' ? 'ASSISTANT MANAGER' : shiftName.toUpperCase()}
+                          </h3>
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold ${badgeStyles}`}>
+                            {String(emps.length).padStart(2, '0')} UNIT{emps.length !== 1 ? 'S' : ''}
+                          </span>
+                        </div>
+                        <ul className="divide-y divide-white/5">
+                          {emps.map((emp, i) => (
+                            <li key={i} className="px-5 py-3.5 flex items-center justify-between hover:bg-white/5 transition-colors group">
+                              <div className="flex items-center gap-4">
+                                <div className="w-8 h-8 rounded-full bg-zinc-800 border border-white/5 flex items-center justify-center text-xs font-mono text-zinc-500 group-hover:border-zinc-600 transition-colors">
+                                  {String(i + 1).padStart(2, '0')}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-zinc-200 text-sm">{getName(emp, columns)}</p>
+                                  {getId(emp, columns) && (
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      <Fingerprint className="w-3 h-3 text-zinc-600" />
+                                      <p className="text-[10px] text-zinc-500 font-mono tracking-wider">{getId(emp, columns)}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              
+              {selectedDate && Object.keys(shifts).length > 0 && (
+                <div className="fixed bottom-24 left-0 right-0 flex justify-center z-20 pointer-events-none px-4">
+                  <button 
+                    onClick={handleShare} 
+                    className="pointer-events-auto w-full max-w-sm bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-[0_0_20px_rgba(16,185,129,0.3)] shadow-emerald-500/20 py-4 rounded-2xl font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-3 active:scale-[0.98] transition-all"
+                  >
+                    <Share2 className="w-4 h-4" /><span>Dispatch to WhatsApp</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* -------------------- MONTHLY TAB -------------------- */}
+            <div className={`transition-opacity duration-300 ${activeTab === 'monthly' ? 'opacity-100 block' : 'opacity-0 hidden'}`}>
+               <div className="flex items-center gap-3 mb-6 px-1">
+                 <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
+                   <Map className="w-4 h-4 text-indigo-400" />
+                 </div>
+                 <h2 className="text-xl font-display font-bold text-zinc-100">Global Overview</h2>
+               </div>
+               
+               <div className="grid gap-5">
+                 {dateList.map(date => {
+                   let counts = { p1: 0, p2: 0, am: 0, leave: 0, wo: 0, tr: 0, coff: 0, totalWorking: 0, total: 0 };
+                   data.forEach(row => {
+                     const v = String(row[date] || '').trim().toUpperCase();
+                     if (v) counts.total++;
+                     
+                     // Determine if the person is available to work
+                     // Any non-absence is considered working
+                     const isWorking = v && !['WO', 'OFF', 'C/OFF', 'LEAVE', 'PL', 'CL', 'SL', 'TR', 'TRAIN'].some(skip => v.includes(skip));
+                     if (isWorking) counts.totalWorking++;
+
+                     if (v.includes('P1')) counts.p1++;
+                     else if (v.includes('P2')) counts.p2++;
+                     else if (v === 'AM') counts.am++;
+                     else if (v === 'TR' || v.includes('TRAIN')) counts.tr++;
+                     else if (v.includes('C/OFF')) counts.coff++;
+                     else if (['LEAVE', 'PL', 'CL', 'SL'].includes(v) || v.includes('LEAVE')) counts.leave++;
+                     else if (['WO', 'OFF'].includes(v) || v.includes('WO')) counts.wo++;
+                   });
+
+                   return (
+                     <div key={date} className="bg-zinc-900 border border-white/5 p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden">
+                       <div className="flex justify-between items-end border-b border-white/5 pb-3">
+                         <h3 className="font-mono font-bold text-zinc-100 tracking-wider text-lg">[{date}]</h3>
+                       </div>
+                       
+                       <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 text-center shadow-[inset_0_0_20px_rgba(16,185,129,0.05)]">
+                          <p className="text-[10px] text-emerald-400 font-mono tracking-widest uppercase mb-1">Total Manpower Available On Shift</p>
+                          <p className="text-3xl font-display font-bold text-emerald-400">{counts.totalWorking}</p>
+                       </div>
+
+                       <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-xl p-4 text-center">
+                          <p className="text-[10px] text-cyan-400 font-mono tracking-widest uppercase mb-1">P1 + P2 Count</p>
+                          <p className="text-2xl font-display font-bold text-cyan-400">{counts.p1 + counts.p2}</p>
+                          <div className="flex justify-center gap-6 mt-3 text-xs font-mono font-bold bg-black/30 p-2 rounded-lg mx-auto max-w-[200px] border border-white/5">
+                            <span className="text-cyan-300">P1: <span className="text-cyan-100">{counts.p1}</span></span>
+                            <span className="text-indigo-300">P2: <span className="text-indigo-100">{counts.p2}</span></span>
+                          </div>
+                       </div>
+
+                       <div className="grid grid-cols-4 gap-2 text-[10px] font-mono tracking-widest uppercase text-center mt-2">
+                         <div className="bg-zinc-950 border border-blue-500/10 p-2.5 rounded-xl flex flex-col items-center justify-center gap-1">
+                           <span className="text-zinc-500">AM</span> 
+                           <span className="text-blue-400 font-bold text-sm">{counts.am}</span>
+                         </div>
+                         <div className="bg-zinc-950 border border-amber-500/10 p-2.5 rounded-xl flex flex-col items-center justify-center gap-1">
+                           <span className="text-zinc-500">WO</span> 
+                           <span className="text-amber-400 font-bold text-sm">{counts.wo + counts.coff}</span>
+                         </div>
+                         <div className="bg-zinc-950 border border-rose-500/10 p-2.5 rounded-xl flex flex-col items-center justify-center gap-1">
+                           <span className="text-zinc-500">LV</span> 
+                           <span className="text-rose-400 font-bold text-sm">{counts.leave}</span>
+                         </div>
+                         <div className="bg-zinc-950 border border-fuchsia-500/10 p-2.5 rounded-xl flex flex-col items-center justify-center gap-1">
+                           <span className="text-zinc-500">TR</span> 
+                           <span className="text-fuchsia-400 font-bold text-sm">{counts.tr}</span>
+                         </div>
+                       </div>
+                     </div>
+                   );
+                 })}
+               </div>
+            </div>
+
+            {/* -------------------- GRID TAB -------------------- */}
+            <div className={`transition-opacity duration-300 ${activeTab === 'grid' ? 'opacity-100 block' : 'opacity-0 hidden'}`}>
+               <div className="flex items-center gap-3 mb-6 px-1">
+                 <div className="w-8 h-8 rounded-xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
+                   <Table className="w-4 h-4 text-orange-400" />
+                 </div>
+                 <h2 className="text-xl font-display font-bold text-zinc-100">Live Grid Editor</h2>
+               </div>
+               
+               <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-400 mb-4 px-1 leading-relaxed">
+                 Edits applied here save automatically. Scroll horizontally to view full timeline. Auto-suggestions natively active.
+               </p>
+
+               <div className="relative overflow-auto bg-zinc-900 border border-white/10 rounded-2xl h-[70vh] shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                 <table className="w-full text-left border-collapse text-sm">
+                   <thead className="bg-zinc-950 sticky top-0 z-20">
+                     <tr>
+                       <th className="p-4 border-b border-r border-white/10 text-zinc-400 font-mono sticky left-0 bg-zinc-950 z-30 min-w-[150px]">Identity</th>
+                       {dateList.map(d => (
+                           <th key={d} className="p-4 border-b border-r border-white/10 text-cyan-400 font-mono whitespace-nowrap text-center text-xs tracking-wider min-w-[120px]">{d}</th>
+                       ))}
+                     </tr>
+                   </thead>
+                   <tbody>
+                      {data.map((row) => (
+                         <tr key={row._uid} className="hover:bg-white/5 transition-colors group">
+                            <td className="p-4 border-b border-r border-white/10 text-zinc-100 font-bold sticky left-0 bg-zinc-900 group-hover:bg-zinc-800 z-10 whitespace-nowrap transition-colors">
+                               {getName(row, columns)}
+                            </td>
+                            {dateList.map(d => (
+                               <td key={d} className="border-b border-r border-white/5 min-w-[120px] p-0 relative focus-within:z-20 h-[56px]">
+                                  <input 
+                                     list="shift-suggestions"
+                                     value={String(row[d] || '')}
+                                     onChange={e => handleInlineEdit(String(row._uid), d, e.target.value)}
+                                     className="absolute inset-0 w-full h-full pb-1 bg-transparent text-center font-bold text-indigo-300 outline-none focus:bg-indigo-500/20 focus:text-indigo-100 transition-all uppercase placeholder-zinc-800 focus:shadow-[inset_0_0_0_1px_rgba(99,102,241,0.5)]"
+                                     placeholder="-"
+                                     autoComplete="off"
+                                  />
+                               </td>
+                            ))}
+                         </tr>
+                      ))}
+                   </tbody>
+                   <tfoot className="bg-zinc-950 sticky bottom-0 z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+                     <tr>
+                       <td className="p-4 border-t border-r border-white/10 text-emerald-400 font-mono font-bold sticky left-0 bg-zinc-950 z-30 uppercase text-xs tracking-widest border-b">
+                         Total Available
+                       </td>
+                       {dateList.map(d => (
+                         <td key={d} className="p-4 border-t border-r border-b border-white/10 text-emerald-400 font-display font-bold text-center text-lg bg-emerald-500/5">
+                           {gridStats[d]?.totalWorking || 0}
+                         </td>
+                       ))}
+                     </tr>
+                     <tr>
+                       <td className="p-4 border-r border-white/10 text-zinc-500 font-mono text-[10px] sticky left-0 bg-zinc-950 z-30 uppercase tracking-widest leading-relaxed">
+                         Shift Breakdown
+                       </td>
+                       {dateList.map(d => {
+                         const validEntries = Object.entries(gridStats[d]?.breakdown || {}) as [string, number][];
+                         return (
+                         <td key={'brk-'+d} className="p-2 border-r border-white/10 text-center align-top bg-zinc-950/50 min-h-[60px]">
+                           <div className="flex flex-col gap-1 text-[9px] font-mono">
+                             {validEntries
+                               .sort((a, b) => b[1] - a[1])
+                               .map(([shift, count]) => (
+                               <div key={shift} className="flex justify-between items-center bg-white/5 px-2 py-1 rounded">
+                                 <span className="text-zinc-400">{shift}</span>
+                                 <span className="text-cyan-400 font-bold ml-2">{count}</span>
+                               </div>
+                             ))}
+                           </div>
+                         </td>
+                       )})}
+                     </tr>
+                   </tfoot>
+                 </table>
+               </div>
+            </div>
+
+            {/* -------------------- ALLOCATE TAB -------------------- */}
+            <div className={`transition-opacity duration-300 ${activeTab === 'allocate' ? 'opacity-100 block' : 'opacity-0 hidden'}`}>
+              <div className="flex items-center gap-3 mb-6 px-1">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                  <Briefcase className="w-4 h-4 text-emerald-400" />
+                </div>
+                <h2 className="text-xl font-display font-bold text-zinc-100">Range Allocation</h2>
+              </div>
+              
+              <div className="bg-zinc-900 border border-white/5 p-5 rounded-3xl shadow-[0_0_20px_rgba(0,0,0,0.3)] mb-8">
+                <div className="grid gap-4">
+                  <div>
+                    <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">Select Identity</label>
+                    <select 
+                      value={allocStaffUid}
+                      onChange={e => setAllocStaffUid(e.target.value)}
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
+                    >
+                      <option value="">-- Choose Staff --</option>
+                      {data.map(emp => (
+                        <option key={String(emp._uid)} value={String(emp._uid)}>
+                          {getName(emp, columns)} {getId(emp, columns) ? `(${getId(emp, columns)})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">Value / Type</label>
+                    <select 
+                      value={allocType}
+                      onChange={e => setAllocType(e.target.value)}
+                      className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
+                    >
+                      <option value="LEAVE">Leave (General)</option>
+                      <option value="PL">Privilege Leave (PL)</option>
+                      <option value="CL">Casual Leave (CL)</option>
+                      <option value="SL">Sick Leave (SL)</option>
+                      <option value="TR">Training (TR)</option>
+                      <option value="WO">Weekly Off (WO)</option>
+                      <option value="C/OFF">Comp Off (C/OFF)</option>
+                      <option value="-">Clear Value (-)</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">From Node</label>
+                      <select 
+                        value={allocStart}
+                        onChange={e => setAllocStart(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
+                      >
+                        <option value="">Select Date</option>
+                        {dateList.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">To Node</label>
+                      <select 
+                        value={allocEnd}
+                        onChange={e => setAllocEnd(e.target.value)}
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
+                      >
+                        <option value="">Select Date</option>
+                        {dateList.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={handleAddAllocation}
+                    disabled={!allocStaffUid || !allocStart || !allocEnd}
+                    className="mt-2 w-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 py-3.5 rounded-xl font-bold uppercase tracking-widest text-xs active:bg-emerald-500/20 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Apply to Schedule
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                 <h3 className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Active Range Logs</h3>
+                 {allocations.length === 0 ? (
+                   <div className="text-center py-10 bg-zinc-900 border border-white/5 rounded-3xl">
+                     <p className="text-zinc-600 font-mono text-xs">No range allocations applied.</p>
+                   </div>
+                 ) : (
+                   <ul className="space-y-3">
+                     {allocations.map(alloc => (
+                       <li key={alloc.id} className="bg-zinc-900 border border-white/5 rounded-2xl p-4 flex items-center justify-between shadow-inner">
+                         <div>
+                            <p className="font-bold text-zinc-200 text-sm">{alloc.staffName}</p>
+                            <div className="flex items-center gap-2 mt-1 font-mono text-[10px]">
+                               <span className="text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">{alloc.type}</span>
+                               <span className="text-zinc-500">{alloc.startDate} &rarr; {alloc.endDate}</span>
+                            </div>
+                         </div>
+                         <button 
+                           onClick={() => handleDeleteAllocation(alloc.id)}
+                           className="w-8 h-8 rounded-full bg-zinc-950 flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all border border-white/5 active:scale-95"
+                         >
+                            <Trash2 className="w-3.5 h-3.5" />
+                         </button>
+                       </li>
+                     ))}
+                   </ul>
+                 )}
+              </div>
+            </div>
+
+            {/* -------------------- MANAGE TAB -------------------- */}
+            <div className={`transition-opacity duration-300 ${activeTab === 'manage' ? 'opacity-100 block' : 'opacity-0 hidden'}`}>
+               
+               {data.length === 0 && (
+                  <div className="mb-8 rounded-3xl p-6 text-center flex flex-col items-center justify-center relative overflow-hidden group bg-zinc-900 border border-white/5">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 bg-cyan-500/10 rounded-full blur-[60px]"></div>
+                    <div className="relative z-10">
+                      <div className="w-20 h-20 mx-auto mb-4 rounded-3xl bg-zinc-950 border border-white/10 flex items-center justify-center shadow-[0_0_30px_rgba(34,211,238,0.05)]">
+                        <FileSpreadsheet className="w-8 h-8 text-cyan-400" />
+                      </div>
+                      <h2 className="text-xl font-display font-bold text-white mb-2">Initialize Hub</h2>
+                      <p className="text-zinc-400 text-xs max-w-[250px] mx-auto mb-6 leading-relaxed">
+                        Connect your Excel data source containing core IDs and temporal tracking rows.
+                      </p>
+                      <label className="relative overflow-hidden inline-flex items-center gap-3 bg-zinc-100 hover:bg-white text-[#09090b] px-6 py-3 rounded-xl font-bold uppercase tracking-wider text-[10px] shadow-[0_0_20px_rgba(255,255,255,0.1)] cursor-pointer active:scale-95 transition-all">
+                        <UploadCloud className="w-4 h-4" />
+                        <span>Mount Source File</span>
+                        <input type="file" ref={fileInputRef} accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                    </div>
+                  </div>
+               )}
+
+               <div className="flex items-center justify-between mb-6 px-1">
+                 <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center">
+                      <Users className="w-4 h-4 text-rose-400" />
+                    </div>
+                    <h2 className="text-xl font-display font-bold text-zinc-100">Personnel Roster</h2>
+                 </div>
+                 <button onClick={handleExport} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-xl text-[10px] font-mono tracking-widest uppercase flex items-center gap-2 active:scale-95 border border-white/5 transition-all shadow-[0_0_10px_rgba(0,0,0,0.5)]">
+                   <Download className="w-3.5 h-3.5" /> Export DB
+                 </button>
+               </div>
+               
+               <div className="flex gap-3 mb-6">
+                 <button 
+                  onClick={() => {
+                    let activeCols = columns;
+                    if (columns.length === 0) {
+                       activeCols = ['Serial Number', 'Employee ID', 'Employee Name', 'Designation'];
+                       setColumns(activeCols);
+                    }
+                    const newEmpRow: RowData = { _uid: generateUid() };
+                    activeCols.forEach(c => newEmpRow[c] = '');
+                    setEditingStaff(newEmpRow);
+                  }}
+                  className="bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 px-4 py-3.5 rounded-xl font-bold flex items-center gap-2 w-full justify-center active:bg-cyan-500/20 transition-all text-xs uppercase tracking-widest shadow-inner">
+                    <UserPlus className="w-4 h-4 hidden sm:block"/> Add Identity
+                 </button>
+               </div>
+
+               <div className="bg-zinc-900 border border-white/5 rounded-3xl overflow-hidden shadow-[0_0_20px_rgba(0,0,0,0.3)]">
+                 <ul className="divide-y divide-white/5 max-h-[55vh] overflow-y-auto">
+                    {data.map(emp => (
+                      <li key={String(emp._uid)} onClick={() => setEditingStaff(emp)} className="px-5 py-4 flex items-center justify-between active:bg-zinc-800 cursor-pointer group hover:bg-white/5 transition-colors">
+                        <div className="flex gap-4 items-center">
+                          <div className="w-10 h-10 rounded-full bg-zinc-800 border border-white/5 flex items-center justify-center text-zinc-500 font-mono text-xs group-hover:border-cyan-500/30 group-hover:text-cyan-400 transition-colors">
+                            {getName(emp, columns).substring(0,2).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-zinc-200 text-sm group-hover:text-white transition-colors">{getName(emp, columns)}</p>
+                            <p className="text-[10px] text-zinc-600 font-mono mt-1 tracking-wider">{getId(emp, columns) || 'UNASSIGNED ID'}</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-zinc-700 group-hover:text-cyan-400 transition-colors" />
+                      </li>
+                    ))}
+                 </ul>
+               </div>
+            </div>
+          </>
+        )}
+      </main>
+
+      {/* BOTTOM NAVIGATION */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-[#09090b]/90 backdrop-blur-2xl border-t border-white/10 pb-7 pt-4 px-2 sm:px-4 z-40">
+         <div className="max-w-md mx-auto flex justify-around">
+           <button onClick={() => setActiveTab('daily')} className={`flex flex-col items-center gap-1.5 w-[70px] sm:w-20 transition-colors ${activeTab === 'daily' ? 'text-cyan-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
+             <Calendar className="w-5 h-5"/> <span className="text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">Daily</span>
+           </button>
+           <button onClick={() => setActiveTab('monthly')} className={`flex flex-col items-center gap-1.5 w-[70px] sm:w-20 transition-colors ${activeTab === 'monthly' ? 'text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
+             <Map className="w-5 h-5"/> <span className="text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">Matrix</span>
+           </button>
+           <button onClick={() => setActiveTab('grid')} className={`flex flex-col items-center gap-1.5 w-[70px] sm:w-20 transition-colors ${activeTab === 'grid' ? 'text-orange-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
+             <Table className="w-5 h-5"/> <span className="text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">Grid</span>
+           </button>
+           <button onClick={() => setActiveTab('allocate')} className={`flex flex-col items-center gap-1.5 w-[70px] sm:w-20 transition-colors ${activeTab === 'allocate' ? 'text-emerald-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
+             <Briefcase className="w-5 h-5"/> <span className="text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">Range</span>
+           </button>
+           <button onClick={() => setActiveTab('manage')} className={`flex flex-col items-center gap-1.5 w-[70px] sm:w-20 transition-colors ${activeTab === 'manage' ? 'text-rose-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
+             <Settings2 className="w-5 h-5"/> <span className="text-[9px] sm:text-[10px] uppercase tracking-widest font-bold">Profile</span>
+           </button>
+         </div>
+      </nav>
+
+      {/* EDIT STAFF OVERLAY */}
+      {editingStaff && (
+        <div className="fixed inset-0 bg-[#09090b] z-[60] flex flex-col pt-safe animate-in fade-in duration-200">
+          <div className="flex items-center justify-between p-4 border-b border-white/10 bg-[#09090b]/80 backdrop-blur-xl sticky top-0 z-20">
+            <h2 className="text-sm font-mono tracking-widest text-zinc-400 uppercase">Modify Identity</h2>
+            <button onClick={() => setEditingStaff(null)} className="w-8 h-8 flex items-center justify-center bg-zinc-900 border border-white/10 rounded-full text-zinc-400 hover:text-white transition-colors active:scale-95">
+               <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto px-5 py-6 space-y-8 pb-32">
+            
+            <div className="space-y-4">
+               <h3 className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest flex items-center gap-2">
+                 <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></span> Core Attributes
+               </h3>
+               <div className="grid gap-3">
+                 {columns.filter(c => isNameOrId(c)).sort((a,b) => getColumnWeight(a) - getColumnWeight(b)).map(col => (
+                   <div key={col} className="bg-zinc-900/50 border border-white/5 rounded-2xl p-3 focus-within:border-cyan-500/50 transition-colors shadow-inner">
+                     <label className="block text-[10px] font-mono text-zinc-600 mb-1.5 uppercase tracking-wide px-1">{col}</label>
+                     <input 
+                       list={`suggestions-${col.replace(/[^a-zA-Z0-9]/g, '-')}`}
+                       type="text" 
+                       value={String(editingStaff[col] || '')}
+                       onChange={(e) => setEditingStaff({...editingStaff, [col]: e.target.value})}
+                       className="w-full bg-transparent text-zinc-100 text-sm font-bold placeholder-zinc-700 outline-none px-1"
+                       placeholder="Enter value..."
+                       autoComplete="off"
+                     />
+                   </div>
+                 ))}
+               </div>
+            </div>
+
+            {/* AUTOMATION MODULE */}
+            <div className="space-y-4 border-t border-white/5 pt-6">
+               <h3 className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                 <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></span> Automation Engine
+               </h3>
+               <div className="bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 rounded-2xl p-4 shadow-[0_0_20px_rgba(16,185,129,0.05)]">
+                 <div className="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Target Month</label>
+                      <select value={autoMonth} onChange={e=>setAutoMonth(Number(e.target.value))} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold text-emerald-100 outline-none focus:border-emerald-500/50">
+                         {Array.from({length: 12}).map((_, i) => <option key={i} value={i}>{format(new Date(2000, i, 1), 'MMMM')}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Year</label>
+                      <select value={autoYear} onChange={e=>setAutoYear(Number(e.target.value))} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold text-emerald-100 outline-none focus:border-emerald-500/50">
+                         {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+                 </div>
+                 <div className="grid grid-cols-2 gap-3 mb-4">
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Base Shift</label>
+                      <input list="shift-suggestions" value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="e.g. P1"/>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Weekly Off Day</label>
+                      <select value={autoWoDay} onChange={e=>setAutoWoDay(Number(e.target.value))} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold text-emerald-100 outline-none focus:border-emerald-500/50">
+                         {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d,i)=><option key={i} value={i}>{d}</option>)}
+                      </select>
+                    </div>
+                 </div>
+                 <button onClick={handleAutoFill} className="w-full py-3.5 bg-emerald-500/20 text-emerald-400 font-bold uppercase text-[10px] tracking-widest rounded-xl hover:bg-emerald-500/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                    <Zap className="w-3.5 h-3.5" /> Execute Auto-Fill
+                 </button>
+               </div>
+            </div>
+
+            <div className="space-y-6 border-t border-white/5 pt-6">
+               <h3 className="text-[10px] font-mono text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                 <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></span> Timeline Vectors
+               </h3>
+               <div className="flex overflow-x-auto gap-2 pb-2 mb-2 sticky top-[0px] bg-[#09090b] z-10 p-1 -mx-2 px-2 mask-linear">
+                 <div className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-emerald-400 font-mono rounded-lg text-[10px] whitespace-nowrap">Grouped chronologically. Suggested values appear automatically.</div>
+               </div>
+
+               <div className="space-y-8">
+                 {(() => {
+                   const allProfileDates = Array.from(new Set([...dateList, ...Object.keys(editingStaff).filter(k => !isNameOrId(k) && k !== '_uid')]));
+                   
+                   const groups: Record<string, string[]> = {};
+                   allProfileDates.forEach(date => {
+                     const monthMatch = date.match(/[a-zA-Z]{3,}/);
+                     const groupName = monthMatch ? monthMatch[0].toUpperCase() : 'OTHER TIMELINES';
+                     if (!groups[groupName]) groups[groupName] = [];
+                     groups[groupName].push(date);
+                   });
+                   
+                   Object.keys(groups).forEach(g => {
+                      groups[g].sort((a, b) => {
+                         const numA = parseInt(a.match(/\d+/)?.[0] || '0');
+                         const numB = parseInt(b.match(/\d+/)?.[0] || '0');
+                         if (numA !== numB) return numA - numB;
+                         return a.localeCompare(b);
+                      });
+                   });
+
+                   const monthMap: Record<string, number> = { 'JAN':1, 'FEB':2, 'MAR':3, 'APR':4, 'MAY':5, 'JUN':6, 'JUL':7, 'AUG':8, 'SEP':9, 'OCT':10, 'NOV':11, 'DEC':12 };
+                   
+                   return Object.keys(groups).sort((a, b) => {
+                     const orderA = monthMap[a.substring(0,3)] || 99;
+                     const orderB = monthMap[b.substring(0,3)] || 99;
+                     if(orderA !== orderB) return orderA - orderB;
+                     return a.localeCompare(b);
+                   }).map(month => (
+                     <div key={month} className="space-y-3">
+                       <h4 className="text-[11px] font-mono font-bold text-zinc-500 uppercase tracking-widest border-b border-white/5 pb-2 flex items-center gap-2">
+                         <span className="w-1 h-1 bg-zinc-600 rounded-full"></span>
+                         {month}
+                       </h4>
+                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                         {groups[month].map(date => (
+                           <div key={date} className="bg-zinc-900/80 border border-white/5 rounded-xl p-3 focus-within:border-indigo-500/50 transition-colors flex flex-col justify-between shadow-inner">
+                             <label className="text-[10px] font-mono text-zinc-500 uppercase mb-2 truncate block">{date}</label>
+                             <input 
+                               list="shift-suggestions"
+                               type="text" 
+                               value={String(editingStaff[date] || '')}
+                               onChange={(e) => setEditingStaff({...editingStaff, [date]: e.target.value})}
+                               className="w-full bg-transparent font-display font-bold text-indigo-100 uppercase outline-none placeholder-zinc-800"
+                               placeholder="---"
+                               autoComplete="off"
+                             />
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                   ));
+                 })()}
+               </div>
+            </div>
+            
+            <div className="pt-10 mb-8 border-t border-white/5">
+               <button 
+                  className="w-full bg-rose-500/10 text-rose-500 text-xs font-mono uppercase tracking-widest p-4 rounded-2xl border border-rose-500/20 active:bg-rose-500/20 transition-colors"
+                  onClick={() => {
+                     if (confirm("Terminate this personnel record?")) {
+                       const freshData = data.filter(d => d._uid !== editingStaff._uid);
+                       saveDataLocally(freshData, columns);
+                       setEditingStaff(null);
+                     }
+                  }}>
+                  Terminate Record
+               </button>
+            </div>
+          </div>
+
+          <div className="p-5 border-t border-white/10 bg-[#09090b]/80 backdrop-blur-xl absolute bottom-0 w-full pb-safe z-20">
+             <button 
+               onClick={handleCommitProfileChanges}
+               className="w-full bg-cyan-500 text-zinc-950 font-bold py-4 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-[0_0_25px_rgba(34,211,238,0.3)] text-xs uppercase tracking-widest"
+             >
+               <Save className="w-4 h-4"/> Commit Global Changes
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADD DATE OVERLAY */}
+      {showAddDate && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-5 animate-in fade-in duration-200">
+           <div className="bg-zinc-900 border border-white/10 rounded-[32px] p-8 w-full max-w-sm shadow-2xl relative overflow-hidden">
+             
+             <div className="absolute top-0 right-0 p-3">
+               <button onClick={() => setShowAddDate(false)} className="p-2 text-zinc-500 hover:text-white bg-white/5 rounded-full"><X className="w-4 h-4"/></button>
+             </div>
+
+             <div className="w-12 h-12 bg-indigo-500/20 border border-indigo-500/30 rounded-2xl flex items-center justify-center mb-5">
+               <Calendar className="w-6 h-6 text-indigo-400" />
+             </div>
+
+             <h2 className="text-xl font-display font-bold text-zinc-100 mb-2">Initialize Node</h2>
+             <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-500 mb-6 leading-relaxed">
+               Format key must align with source (e.g. 05-May).
+             </p>
+             
+             <input 
+                type="text"
+                autoFocus
+                value={newDateInput}
+                onChange={(e) => setNewDateInput(e.target.value)}
+                placeholder="Target date..."
+                className="w-full p-4 bg-zinc-950 border border-white/10 rounded-2xl font-mono text-zinc-100 mb-6 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-sm placeholder-zinc-700"
+             />
+             
+             <button onClick={handleAddDateSave} className="w-full py-4 bg-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-2xl active:scale-95 transition-all shadow-[0_0_20px_rgba(99,102,241,0.3)]">
+               Mount Date
+             </button>
+           </div>
+        </div>
+      )}
+    </div>
+  );
+}
