@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # NODEJS VERSION FIX
+      # THIS FIXES THE NODEJS VERSION ERROR
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -26,10 +26,11 @@ jobs:
       - name: Build Web App
         run: |
           npm run build
+          # Create a fallback index.html if dist folder is empty
           mkdir -p dist
           touch dist/index.html
 
-      # CAPACITOR AND ANDROID BUILD SETUP (UPDATED TO JAVA 21)
+      # CAPACITOR AND ANDROID BUILD SETUP
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -46,7 +47,7 @@ jobs:
         working-directory: ./android
         run: ./gradlew assembleDebug
 
-      # UPLOAD APK TO GITHUB
+      # UPLOAD APK TO GITHUB SO YOU CAN DOWNLOAD IT ON YOUR PHONE
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
