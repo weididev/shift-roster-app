@@ -1,9 +1,12 @@
-import type { CapacitorConfig } from '@capacitor/cli';
+import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.shiftmanager.pro',
-  appName: 'Shift Manager Pro',
-  webDir: 'dist'
+  appId: 'com.shiftpro.app',
+  appName: 'ShiftPro',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https'
+  }
 };
 
 export default config;
