@@ -40,7 +40,6 @@ jobs:
       - name: Setup & Add Capacitor Android
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "ShiftPro" "com.shiftpro.app" --web-dir dist || true
           npx cap add android || true
           npx cap sync android
 
