@@ -131,7 +131,7 @@ export default function App() {
     return true;
   };
 
-  // Auto-suggestions values dynamically extracted + common ones
+  // Auto-suggestions values dynamically extracted
   const uniqueShifts = useMemo(() => {
     const shiftSet = new Set<string>();
     data.forEach(row => {
@@ -140,7 +140,6 @@ export default function App() {
         if (val) shiftSet.add(val);
       });
     });
-    ['P1', 'P2', 'AM', 'WO', 'PL', 'CL', 'SL', 'C/OFF', 'TR', 'LEAVE', 'SENIOR EXECUTIVE', 'EXECUTIVE', 'OFFICER'].forEach(s => shiftSet.add(s));
     return Array.from(shiftSet).sort();
   }, [data, columns]);
 
@@ -996,7 +995,7 @@ export default function App() {
                             {filteredGridDates.map(d => (
                                <td key={d} className="border-b border-r border-white/5 min-w-[120px] p-0 relative focus-within:z-20 h-[56px]">
                                   <input 
-                                     list="shift-suggestions"
+                                     list={String(row[d] || '').trim().length > 0 ? "shift-suggestions" : undefined}
                                      value={String(row[d] || '')}
                                      onChange={e => handleInlineEdit(String(row._uid), d, e.target.value)}
                                      className="absolute inset-0 w-full h-full pb-1 bg-transparent text-center font-bold text-indigo-300 outline-none focus:bg-indigo-500/20 focus:text-indigo-100 transition-all uppercase placeholder-zinc-800 focus:shadow-[inset_0_0_0_1px_rgba(99,102,241,0.5)]"
@@ -1420,7 +1419,7 @@ export default function App() {
                    <div key={col} className="bg-zinc-900/50 border border-white/5 rounded-2xl p-3 focus-within:border-cyan-500/50 transition-colors shadow-inner">
                      <label className="block text-[10px] font-mono text-zinc-600 mb-1.5 uppercase tracking-wide px-1">{col}</label>
                      <input 
-                       list={`suggestions-${col.replace(/[^a-zA-Z0-9]/g, '-')}`}
+                       list={String(editingStaff[col] || '').trim().length > 0 ? `suggestions-${col.replace(/[^a-zA-Z0-9]/g, '-')}` : undefined}
                        type="text" 
                        value={String(editingStaff[col] || '')}
                        onChange={(e) => setEditingStaff({...editingStaff, [col]: e.target.value})}
@@ -1456,7 +1455,7 @@ export default function App() {
                  <div className="grid grid-cols-2 gap-3 mb-4">
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Base Shift</label>
-                      <input list="shift-suggestions" autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')} value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="Type shift name..."/>
+                      <input list={autoShift.trim().length > 0 ? "shift-suggestions" : undefined} autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')} value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="Type shift name..."/>
                     </div>
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Weekly Off Day</label>
@@ -1518,7 +1517,7 @@ export default function App() {
                            <div key={date} className="bg-zinc-900/80 border border-white/5 rounded-xl p-3 focus-within:border-indigo-500/50 transition-colors flex flex-col justify-between shadow-inner">
                              <label className="text-[10px] font-mono text-zinc-500 uppercase mb-2 truncate block">{date}</label>
                              <input 
-                               list="shift-suggestions"
+                               list={String(editingStaff[date] || '').trim().length > 0 ? "shift-suggestions" : undefined}
                                type="text" 
                                value={String(editingStaff[date] || '')}
                                onChange={(e) => setEditingStaff({...editingStaff, [date]: e.target.value})}
