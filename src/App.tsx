@@ -478,7 +478,7 @@ export default function App() {
   }, [data, selectedDate, columns]);
 
   const generateWhatsAppText = () => {
-    let text = `*SECURITY FORCE PLANNING FOR ${selectedDate.toUpperCase()}*\n\n`;
+    let text = `'''SECURITY FORCE PLANNING FOR ${selectedDate.toUpperCase()}'''\n\n`;
     
     // Categorize shifts into Working vs Leaves/Offs
     const offCategories = ['WO', 'OFF', 'C/OFF', 'COFF', 'LEAVE', 'PL', 'CL', 'SL', 'TR', 'TRAIN', 'TRAINING'];
@@ -701,19 +701,28 @@ export default function App() {
     setEditingStaff(null);
   };
 
+  const [activeSearch, setActiveSearch] = useState({ id: '', val: '' });
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-200 pb-28 font-sans selection:bg-cyan-500/30">
       
       {/* Hidden Datalists for autocomplete */}
       <datalist id="shift-suggestions">
-        {uniqueShifts.map(s => <option key={s} value={s} />)}
+        {uniqueShifts
+          .filter(s => !activeSearch.val || s.toLowerCase().includes(activeSearch.val.toLowerCase()))
+          .map(s => <option key={s} value={s} />)}
       </datalist>
       {columns.map(col => {
          const uniqueVals = Array.from(new Set(data.map(r => String(r[col] || '').trim()).filter(Boolean)));
          const safeId = col.replace(/[^a-zA-Z0-9]/g, '-');
+         const isCurrent = activeSearch.id === `suggestions-${safeId}`;
+         const filteredVals = isCurrent && activeSearch.val 
+           ? uniqueVals.filter(v => v.toLowerCase().includes(activeSearch.val.toLowerCase()))
+           : uniqueVals;
+
          return (
            <datalist key={`list-${col}`} id={`suggestions-${safeId}`}>
-             {uniqueVals.map(v => <option key={v} value={v} />)}
+             {filteredVals.map(v => <option key={v} value={v} />)}
            </datalist>
          );
       })}
@@ -875,7 +884,7 @@ export default function App() {
                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
                    <Map className="w-4 h-4 text-indigo-400" />
                  </div>
-                 <h2 className="text-xl font-display font-bold text-zinc-100">Global Overview</h2>
+                 <h2 className="text-xl font-display font-bold text-zinc-100">Summary Dashboard</h2>
                </div>
                
                <div className="grid gap-5">
@@ -950,7 +959,7 @@ export default function App() {
                    <div className="w-8 h-8 rounded-xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
                      <Table className="w-4 h-4 text-orange-400" />
                    </div>
-                   <h2 className="text-xl font-display font-bold text-zinc-100">Live Grid Editor</h2>
+                   <h2 className="text-xl font-display font-bold text-zinc-100">Master Roster</h2>
                  </div>
                  <div className="flex items-center gap-2">
                    <select value={gridMonth} onChange={e=>setGridMonth(Number(e.target.value))} className="bg-zinc-900 border border-white/10 rounded-lg py-1.5 px-2 text-xs font-bold text-orange-200 outline-none focus:border-orange-500/50 appearance-none">
@@ -997,11 +1006,14 @@ export default function App() {
                                   <input 
                                      list={String(row[d] || '').trim().length > 0 ? "shift-suggestions" : undefined}
                                      value={String(row[d] || '')}
-                                     onChange={e => handleInlineEdit(String(row._uid), d, e.target.value)}
+                                     onChange={e => {
+                                       handleInlineEdit(String(row._uid), d, e.target.value);
+                                       setActiveSearch({ id: 'shift-suggestions', val: e.target.value });
+                                     }}
+                                     onFocus={() => setActiveSearch({ id: 'shift-suggestions', val: String(row[d] || '') })}
                                      className="absolute inset-0 w-full h-full pb-1 bg-transparent text-center font-bold text-indigo-300 outline-none focus:bg-indigo-500/20 focus:text-indigo-100 transition-all uppercase placeholder-zinc-800 focus:shadow-[inset_0_0_0_1px_rgba(99,102,241,0.5)]"
                                      placeholder="-"
                                      autoComplete="off"
-                                     onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
                                   />
                                </td>
                             ))}
@@ -1052,7 +1064,7 @@ export default function App() {
                 <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
                   <Briefcase className="w-4 h-4 text-emerald-400" />
                 </div>
-                <h2 className="text-xl font-display font-bold text-zinc-100">Range Allocation</h2>
+                <h2 className="text-xl font-display font-bold text-zinc-100">Leave Management</h2>
               </div>
               
               <div className="bg-zinc-900 border border-white/5 p-5 rounded-3xl shadow-[0_0_20px_rgba(0,0,0,0.3)] mb-8">
@@ -1370,13 +1382,13 @@ export default function App() {
              <Calendar className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Daily</span>
            </button>
            <button onClick={() => setActiveTab('monthly')} className={`flex flex-col items-center gap-1.5 w-[60px] sm:w-16 transition-colors ${activeTab === 'monthly' ? 'text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
-             <Map className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Matrix</span>
+             <Map className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Summary</span>
            </button>
            <button onClick={() => setActiveTab('grid')} className={`flex flex-col items-center gap-1.5 w-[60px] sm:w-16 transition-colors ${activeTab === 'grid' ? 'text-orange-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
-             <Table className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Grid</span>
+             <Table className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Roster</span>
            </button>
            <button onClick={() => setActiveTab('allocate')} className={`flex flex-col items-center gap-1.5 w-[60px] sm:w-16 transition-colors ${activeTab === 'allocate' ? 'text-emerald-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
-             <Briefcase className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Range</span>
+             <Briefcase className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Leave</span>
            </button>
            <button onClick={() => setActiveTab('manage')} className={`flex flex-col items-center gap-1.5 w-[60px] sm:w-16 transition-colors ${activeTab === 'manage' ? 'text-rose-400' : 'text-zinc-600 hover:text-zinc-400'}`}>
              <Settings2 className="w-5 h-5"/> <span className="text-[9px] uppercase tracking-widest font-bold">Profile</span>
@@ -1422,10 +1434,19 @@ export default function App() {
                        list={String(editingStaff[col] || '').trim().length > 0 ? `suggestions-${col.replace(/[^a-zA-Z0-9]/g, '-')}` : undefined}
                        type="text" 
                        value={String(editingStaff[col] || '')}
-                       onChange={(e) => setEditingStaff({...editingStaff, [col]: e.target.value})}
+                       onChange={(e) => {
+                         setEditingStaff({...editingStaff, [col]: e.target.value});
+                         const safeId = col.replace(/[^a-zA-Z0-9]/g, '-');
+                         setActiveSearch({ id: `suggestions-${safeId}`, val: e.target.value });
+                       }}
                        className="w-full bg-transparent text-zinc-100 text-sm font-bold placeholder-zinc-700 outline-none px-1"
                        placeholder="Enter value..."
-                       autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
+                       autoComplete="off" 
+                       onFocus={(e) => {
+                         e.target.setAttribute('autocomplete', 'chrome-off');
+                         const safeId = col.replace(/[^a-zA-Z0-9]/g, '-');
+                         setActiveSearch({ id: `suggestions-${safeId}`, val: String(editingStaff[col] || '') });
+                       }}
                      />
                    </div>
                  ))}
@@ -1455,7 +1476,18 @@ export default function App() {
                  <div className="grid grid-cols-2 gap-3 mb-4">
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Base Shift</label>
-                      <input list={autoShift.trim().length > 0 ? "shift-suggestions" : undefined} autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')} value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="Type shift name..."/>
+                      <input 
+                        list={autoShift.trim().length > 0 ? "shift-suggestions" : undefined} 
+                        autoComplete="off" 
+                        value={autoShift} 
+                        onChange={e => {
+                          setAutoShift(e.target.value);
+                          setActiveSearch({ id: 'shift-suggestions', val: e.target.value });
+                        }} 
+                        onFocus={() => setActiveSearch({ id: 'shift-suggestions', val: autoShift })}
+                        className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" 
+                        placeholder="Type shift name..."
+                      />
                     </div>
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Weekly Off Day</label>
@@ -1520,11 +1552,14 @@ export default function App() {
                                list={String(editingStaff[date] || '').trim().length > 0 ? "shift-suggestions" : undefined}
                                type="text" 
                                value={String(editingStaff[date] || '')}
-                               onChange={(e) => setEditingStaff({...editingStaff, [date]: e.target.value})}
+                               onChange={(e) => {
+                                 setEditingStaff({...editingStaff, [date]: e.target.value});
+                                 setActiveSearch({ id: 'shift-suggestions', val: e.target.value });
+                               }}
+                               onFocus={() => setActiveSearch({ id: 'shift-suggestions', val: String(editingStaff[date] || '') })}
                                className="w-full bg-transparent font-display font-bold text-indigo-100 uppercase outline-none placeholder-zinc-800"
                                placeholder="---"
                                autoComplete="off"
-                               onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
                              />
                            </div>
                          ))}
