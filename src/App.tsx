@@ -1118,7 +1118,7 @@ export default function App() {
                        <span className="bg-white/5 px-2 py-0.5 rounded-full">{allocations.filter(a => isPastAllocation(a.endDate)).length}</span>
                     </h3>
                     {allocations.filter(a => isPastAllocation(a.endDate)).length === 0 ? null : (
-                      <ul className="space-y-3 opacity-60">
+                      <ul className="space-y-3">
                         {allocations.filter(a => isPastAllocation(a.endDate)).map(alloc => (
                           <li key={alloc.id} className="bg-zinc-950 border border-white/5 rounded-2xl p-4 flex items-center justify-between shadow-[0_0_20px_rgba(0,0,0,0.3)]">
                             <div>
@@ -1335,6 +1335,20 @@ export default function App() {
                  <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></span> Core Attributes
                </h3>
                <div className="grid gap-3">
+                  <div className="bg-zinc-900/50 border border-white/5 rounded-2xl p-3 focus-within:border-cyan-500/50 transition-colors shadow-inner">
+                    <label className="block text-[10px] font-mono text-zinc-600 mb-1.5 uppercase tracking-wide px-1">Current Status</label>
+                    <select 
+                      value={String(editingStaff['Status'] || 'Active')}
+                      onChange={(e) => setEditingStaff({...editingStaff, Status: e.target.value})}
+                      className="w-full bg-transparent text-zinc-100 text-sm font-bold outline-none px-1 appearance-none cursor-pointer"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Resigned">Resigned</option>
+                      <option value="On Long Leave">On Long Leave</option>
+                      <option value="Terminated">Terminated</option>
+                      <option value="Notice Period">Notice Period</option>
+                    </select>
+                  </div>
                  {columns.filter(c => isNameOrId(c)).sort((a,b) => getColumnWeight(a) - getColumnWeight(b)).map(col => (
                    <div key={col} className="bg-zinc-900/50 border border-white/5 rounded-2xl p-3 focus-within:border-cyan-500/50 transition-colors shadow-inner">
                      <label className="block text-[10px] font-mono text-zinc-600 mb-1.5 uppercase tracking-wide px-1">{col}</label>
