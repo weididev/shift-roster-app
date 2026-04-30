@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@capacitor/core": "^6.2.1",
-    "@capacitor/filesystem": "^8.1.2",
-    "@capacitor/share": "^8.0.1",
+    "@capacitor/filesystem": "^6.0.4",
+    "@capacitor/share": "^6.0.4",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "date-fns": "^4.1.0",
