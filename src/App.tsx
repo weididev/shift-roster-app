@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { 
@@ -535,12 +536,12 @@ export default function App() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Roster");
     
-    const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNative;
-    if (isNative) {
+    if (Capacitor.isNativePlatform()) {
       try {
         const base64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+        const path = `Roster_Export_${Date.now()}.xlsx`;
         const result = await Filesystem.writeFile({
-          path: 'Updated_Roster.xlsx',
+          path,
           data: base64,
           directory: Directory.Cache
         });
@@ -548,7 +549,6 @@ export default function App() {
           title: 'Exported Roster',
           text: 'Here is the exported roster.',
           url: result.uri,
-          dialogTitle: 'Share Roster',
         });
       } catch (error) {
         console.error("Native export failed", error);
@@ -563,20 +563,19 @@ export default function App() {
     const backup = { data, columns, allocations, fileName };
     const content = JSON.stringify(backup, null, 2);
     
-    const isNative = typeof window !== 'undefined' && (window as any).Capacitor?.isNative;
-    if (isNative) {
+    if (Capacitor.isNativePlatform()) {
       try {
+        const path = `shiftpro_backup_${Date.now()}.json`;
         const result = await Filesystem.writeFile({
-          path: 'shiftpro_backup.json',
+          path,
           data: content,
           directory: Directory.Cache,
           encoding: Encoding.UTF8
         });
         await Share.share({
-          title: 'ShiftPro Database Backup',
+          title: 'ShiftPro Backup',
           text: 'Sharing ShiftPro Database Backup',
           url: result.uri,
-          dialogTitle: 'Share Backup',
         });
       } catch (error) {
         console.error("Native backup export failed", error);
@@ -1002,7 +1001,8 @@ export default function App() {
                                      onChange={e => handleInlineEdit(String(row._uid), d, e.target.value)}
                                      className="absolute inset-0 w-full h-full pb-1 bg-transparent text-center font-bold text-indigo-300 outline-none focus:bg-indigo-500/20 focus:text-indigo-100 transition-all uppercase placeholder-zinc-800 focus:shadow-[inset_0_0_0_1px_rgba(99,102,241,0.5)]"
                                      placeholder="-"
-                                     autoComplete="new-password"
+                                     autoComplete="off"
+                                     onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
                                   />
                                </td>
                             ))}
@@ -1426,7 +1426,7 @@ export default function App() {
                        onChange={(e) => setEditingStaff({...editingStaff, [col]: e.target.value})}
                        className="w-full bg-transparent text-zinc-100 text-sm font-bold placeholder-zinc-700 outline-none px-1"
                        placeholder="Enter value..."
-                       autoComplete="new-password"
+                       autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
                      />
                    </div>
                  ))}
@@ -1456,7 +1456,7 @@ export default function App() {
                  <div className="grid grid-cols-2 gap-3 mb-4">
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Base Shift</label>
-                      <input list="shift-suggestions" autoComplete="new-password" value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="Type shift name..."/>
+                      <input list="shift-suggestions" autoComplete="off" onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')} value={autoShift} onChange={e=>setAutoShift(e.target.value)} className="w-full bg-zinc-900 border border-white/10 rounded-xl p-3 text-xs font-bold uppercase text-emerald-100 outline-none focus:border-emerald-500/50" placeholder="Type shift name..."/>
                     </div>
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">Weekly Off Day</label>
@@ -1524,7 +1524,8 @@ export default function App() {
                                onChange={(e) => setEditingStaff({...editingStaff, [date]: e.target.value})}
                                className="w-full bg-transparent font-display font-bold text-indigo-100 uppercase outline-none placeholder-zinc-800"
                                placeholder="---"
-                               autoComplete="new-password"
+                               autoComplete="off"
+                               onFocus={(e) => e.target.setAttribute('autocomplete', 'chrome-off')}
                              />
                            </div>
                          ))}
