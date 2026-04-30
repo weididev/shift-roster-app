@@ -478,7 +478,7 @@ export default function App() {
   }, [data, selectedDate, columns]);
 
   const generateWhatsAppText = () => {
-    let text = ````SECURITY FORCE PLANNING FOR ${selectedDate.toUpperCase()}```\n\n`;
+    let text = `*SECURITY FORCE PLANNING FOR ${selectedDate.toUpperCase()}*\n\n`;
     
     // Categorize shifts into Working vs Leaves/Offs
     const offCategories = ['WO', 'OFF', 'C/OFF', 'COFF', 'LEAVE', 'PL', 'CL', 'SL', 'TR', 'TRAIN', 'TRAINING'];
