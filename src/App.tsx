@@ -1226,7 +1226,18 @@ export default function App() {
                             {getName(emp, columns).substring(0,2).toUpperCase()}
                           </div>
                           <div>
-                            <p className="font-bold text-zinc-200 text-sm group-hover:text-white transition-colors">{getName(emp, columns)}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-zinc-200 text-sm group-hover:text-white transition-colors">{getName(emp, columns)}</p>
+                              {emp['Status'] && emp['Status'] !== 'Active' && (
+                                <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
+                                  emp['Status'] === 'Resigned' || emp['Status'] === 'Terminated' 
+                                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/20' 
+                                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/20'
+                                }`}>
+                                  {emp['Status']}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[10px] text-zinc-600 font-mono mt-1 tracking-wider">{getId(emp, columns) || 'UNASSIGNED ID'}</p>
                           </div>
                         </div>
