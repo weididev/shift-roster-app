@@ -9,6 +9,8 @@ import {
   Settings2, Fingerprint, Map, Table, Zap, Briefcase, Edit2, History
 } from 'lucide-react';
 import { format, addDays, getDay, startOfMonth, getDaysInMonth } from 'date-fns';
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 type RowData = Record<string, string | number>;
 
@@ -1105,26 +1107,24 @@ export default function App() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">From Node</label>
-                      <select 
-                        value={allocStart}
-                        onChange={e => setAllocStart(e.target.value)}
-                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
-                      >
-                        <option value="">Select Date</option>
-                        {dateList.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">From Date</label>
+                      <DatePicker 
+                        selected={allocStart ? new Date(allocStart) : null}
+                        onChange={(date: Date | null) => setAllocStart(date ? date.toISOString().split('T')[0] : '')}
+                        dateFormat="yyyy-MM-dd"
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50"
+                        placeholderText="Select date"
+                      />
                     </div>
                     <div>
-                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">To Node</label>
-                      <select 
-                        value={allocEnd}
-                        onChange={e => setAllocEnd(e.target.value)}
-                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50 appearance-none"
-                      >
-                        <option value="">Select Date</option>
-                        {dateList.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
+                      <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">To Date</label>
+                      <DatePicker 
+                        selected={allocEnd ? new Date(allocEnd) : null}
+                        onChange={(date: Date | null) => setAllocEnd(date ? date.toISOString().split('T')[0] : '')}
+                        dateFormat="yyyy-MM-dd"
+                        className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50"
+                        placeholderText="Select date"
+                      />
                     </div>
                   </div>
 
@@ -1513,9 +1513,10 @@ export default function App() {
                <div className="space-y-8">
                  {(() => {
                    const allProfileDates = Array.from(new Set([...dateList, ...Object.keys(editingStaff).filter(k => !isNameOrId(k) && k !== '_uid')]));
+                   const filteredDates = allProfileDates.filter(date => isColumnInMonth(date, autoMonth, autoYear));
                    
                    const groups: Record<string, string[]> = {};
-                   allProfileDates.forEach(date => {
+                   filteredDates.forEach(date => {
                      const monthMatch = date.match(/[a-zA-Z]{3,}/);
                      const groupName = monthMatch ? monthMatch[0].toUpperCase() : 'OTHER TIMELINES';
                      if (!groups[groupName]) groups[groupName] = [];
