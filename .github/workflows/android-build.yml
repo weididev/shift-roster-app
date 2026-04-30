@@ -42,4 +42,3 @@ jobs:
       with:
         name: shift-manager-pro-apk
         path: android/app/build/outputs/apk/debug/app-debug.apk
-        
