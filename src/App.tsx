@@ -64,15 +64,21 @@ export default function App() {
      const today = new Date();
      today.setHours(0,0,0,0);
      
-     let d = new Date(endDateStr);
-     if (isNaN(d.getTime())) d = new Date(`${endDateStr} ${today.getFullYear()}`);
+     // Robust parsing
+     let d: Date;
+     const clean = endDateStr.trim().replace(/[-/.,]/g, ' ');
+     d = new Date(clean);
+     
+     // If incomplete date like "30 Apr", append current year
      if (isNaN(d.getTime())) {
-        const clean = endDateStr.replace(/-/g, ' ').replace(/\//g, ' ');
         d = new Date(`${clean} ${today.getFullYear()}`);
      }
-     if (isNaN(d.getTime())) return false;
      
+     if (isNaN(d.getTime())) return false; // Default to not past if we can't parse
+     
+     // Set to very end of the day to ensure it stays active/upcoming on that day
      d.setHours(23, 59, 59, 999);
+     
      return d.getTime() < new Date().getTime();
   };
 
