@@ -65,21 +65,29 @@ export default function App() {
   
   const [allocations, setAllocations] = useState<AllocationRecord[]>([]);
   
+  const parseDateRobust = (dateStr: string) => {
+     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return new Date(dateStr);
+     
+     const clean = dateStr.trim().replace(/[-/.,]/g, ' ');
+     let d = new Date(clean);
+     const currentYear = new Date().getFullYear();
+     
+     if (!isNaN(d.getTime()) && d.getFullYear() === 2001) {
+         d.setFullYear(currentYear);
+     }
+     
+     if (isNaN(d.getTime())) {
+        d = new Date(`${clean} ${currentYear}`);
+     }
+     return d;
+  };
+
   const isPastAllocation = (endDateStr: string) => {
      const today = new Date();
      today.setHours(0,0,0,0);
      
-     // Robust parsing
-     let d: Date;
-     const clean = endDateStr.trim().replace(/[-/.,]/g, ' ');
-     d = new Date(clean);
-     
-     // If incomplete date like "30 Apr", append current year
-     if (isNaN(d.getTime())) {
-        d = new Date(`${clean} ${today.getFullYear()}`);
-     }
-     
-     if (isNaN(d.getTime())) return false; // Default to not past if we can't parse
+     const d = parseDateRobust(endDateStr);
+     if (isNaN(d.getTime())) return false; 
      
      // Set to very end of the day to ensure it stays active/upcoming on that day
      d.setHours(23, 59, 59, 999);
@@ -109,6 +117,11 @@ export default function App() {
   const [gridYear, setGridYear] = useState<number>(new Date().getFullYear());
 
   const isColumnInMonth = (col: string, targetMonth: number, targetYear: number) => {
+    const d = parseDateRobust(col);
+    if (!isNaN(d.getTime())) {
+       return d.getMonth() === targetMonth;
+    }
+    
     const clean = col.toLowerCase().trim();
     if (/^\d{1,2}$/.test(clean)) return true;
 
@@ -272,13 +285,18 @@ export default function App() {
       if(!allocStaffUid || !allocType || !allocStart || !allocEnd) return;
       
       const dList = getDateColumns(columns);
-      const startIdx = dList.indexOf(allocStart);
-      const endIdx = dList.indexOf(allocEnd);
-      if(startIdx === -1 || endIdx === -1) return;
-      
-      const minIdx = Math.min(startIdx, endIdx);
-      const maxIdx = Math.max(startIdx, endIdx);
-      const targetDates = dList.slice(minIdx, maxIdx + 1);
+      const startDt = new Date(allocStart);
+      const endDt = new Date(allocEnd);
+      startDt.setHours(0,0,0,0);
+      endDt.setHours(23,59,59,999);
+
+      const targetDates = dList.filter(col => {
+         const d = parseDateRobust(col);
+         if (isNaN(d.getTime())) return false;
+         return d >= startDt && d <= endDt;
+      });
+
+      if(targetDates.length === 0) return;
 
       const staffRow = data.find(d => d._uid === allocStaffUid);
       if(!staffRow) return;
@@ -293,8 +311,8 @@ export default function App() {
           staffUid: allocStaffUid,
           staffName: getName(staffRow, columns),
           type: allocType,
-          startDate: dList[minIdx],
-          endDate: dList[maxIdx],
+          startDate: allocStart,
+          endDate: allocEnd,
           timestamp: Date.now(),
           previousValues
       };
@@ -715,7 +733,7 @@ export default function App() {
           .map(s => <option key={s} value={s} />)}
       </datalist>
       {columns.map(col => {
-         const uniqueVals = Array.from(new Set(data.map(r => String(r[col] || '').trim()).filter(Boolean)));
+         const uniqueVals = Array.from(new Set<string>(data.map(r => String(r[col] || '').trim()).filter(Boolean)));
          const safeId = col.replace(/[^a-zA-Z0-9]/g, '-');
          const isCurrent = activeSearch.id === `suggestions-${safeId}`;
          const filteredVals = isCurrent && activeSearch.val 
