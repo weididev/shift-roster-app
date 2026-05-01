@@ -740,6 +740,7 @@ export default function App() {
           <div>
             <h1 className="text-lg font-display font-bold tracking-wide text-zinc-100">SHIFT<span className="text-cyan-400">PRO</span></h1>
             {fileName && <p className="text-[10px] text-zinc-500 font-mono tracking-wider max-w-[150px] truncate">{fileName}</p>}
+            <p className="text-[9px] text-zinc-600 font-mono mt-0.5">Developer: weididev</p>
           </div>
         </div>
         
