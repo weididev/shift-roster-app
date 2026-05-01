@@ -66,7 +66,10 @@ export default function App() {
   const [allocations, setAllocations] = useState<AllocationRecord[]>([]);
   
   const parseDateRobust = (dateStr: string) => {
-     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return new Date(dateStr);
+     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+         const parts = dateStr.split('-');
+         return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+     }
      
      const clean = dateStr.trim().replace(/[-/.,]/g, ' ');
      let d = new Date(clean);
@@ -285,8 +288,8 @@ export default function App() {
       if(!allocStaffUid || !allocType || !allocStart || !allocEnd) return;
       
       const dList = getDateColumns(columns);
-      const startDt = new Date(allocStart);
-      const endDt = new Date(allocEnd);
+      const startDt = parseDateRobust(allocStart);
+      const endDt = parseDateRobust(allocEnd);
       startDt.setHours(0,0,0,0);
       endDt.setHours(23,59,59,999);
 
@@ -1128,8 +1131,8 @@ export default function App() {
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">From Date</label>
                       <DatePicker 
-                        selected={allocStart ? new Date(allocStart) : null}
-                        onChange={(date: Date | null) => setAllocStart(date ? date.toISOString().split('T')[0] : '')}
+                        selected={allocStart ? new Date(allocStart + 'T00:00:00') : null}
+                        onChange={(date: Date | null) => setAllocStart(date ? format(date, 'yyyy-MM-dd') : '')}
                         dateFormat="yyyy-MM-dd"
                         className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50"
                         placeholderText="Select date"
@@ -1138,8 +1141,8 @@ export default function App() {
                     <div>
                       <label className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest block mb-1">To Date</label>
                       <DatePicker 
-                        selected={allocEnd ? new Date(allocEnd) : null}
-                        onChange={(date: Date | null) => setAllocEnd(date ? date.toISOString().split('T')[0] : '')}
+                        selected={allocEnd ? new Date(allocEnd + 'T00:00:00') : null}
+                        onChange={(date: Date | null) => setAllocEnd(date ? format(date, 'yyyy-MM-dd') : '')}
                         dateFormat="yyyy-MM-dd"
                         className="w-full bg-zinc-950 border border-white/10 rounded-xl p-3 text-sm font-bold text-zinc-200 outline-none focus:border-emerald-500/50"
                         placeholderText="Select date"
